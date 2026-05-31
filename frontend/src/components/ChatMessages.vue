@@ -112,7 +112,7 @@
     </div>
     <MessageNav
       v-if="userMessages.length > 0"
-      :user-messages="userMessages"
+      :user-messages="userMessages as any"
       :active-nav-index="activeNavIndex"
       @scroll-to-message="scrollToMessage"
     />
