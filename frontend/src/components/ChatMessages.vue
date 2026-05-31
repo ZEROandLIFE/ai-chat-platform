@@ -146,5 +146,6 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+    align-items: flex-start;
   }
 </style>
