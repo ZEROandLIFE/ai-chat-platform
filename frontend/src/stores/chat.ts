@@ -1,11 +1,8 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import type { ChatState, Message, Conversation } from "../types";
-import {
-  generateId,
-  generateConversationTitle,
-  MOCK_RESPONSES,
-} from "../types";
+import type { Message, Conversation } from "../types";
+import { generateId, generateConversationTitle } from "../types";
+import { chatCompletionStream } from "../utils/mockApi";
 
 const STORAGE_KEY = "ai-chat-conversations";
 
@@ -128,6 +125,37 @@ export const useChatStore = defineStore("chat", () => {
     }
   }
 
+  function appendMessageContent(messageId: string, content: string) {
+    const conv = currentConversation.value;
+    if (!conv) return;
+
+    const msg = conv.messages.find((m) => m.id === messageId);
+    if (msg) {
+      msg.content += content;
+      saveToStorage();
+    }
+  }
+
+  function setMessageStreaming(messageId: string, isStreaming: boolean) {
+    const conv = currentConversation.value;
+    if (!conv) return;
+
+    const msg = conv.messages.find((m) => m.id === messageId);
+    if (msg) {
+      msg.isStreaming = isStreaming;
+    }
+  }
+
+  function setMessageStopped(messageId: string, isStopped: boolean) {
+    const conv = currentConversation.value;
+    if (!conv) return;
+
+    const msg = conv.messages.find((m) => m.id === messageId);
+    if (msg) {
+      msg.isStopped = isStopped;
+    }
+  }
+
   function deleteMessage(messageId: string) {
     const conv = currentConversation.value;
     if (!conv) return;
@@ -152,22 +180,35 @@ export const useChatStore = defineStore("chat", () => {
     isLoading.value = true;
     isGenerating.value = true;
 
-    const userMessage = addMessage(content, "user");
+    addMessage(content, "user");
     quotedMessage.value = null;
 
-    try {
-      await new Promise((resolve) =>
-        setTimeout(resolve, 800 + Math.random() * 700),
-      );
+    const aiMessage = addMessage("", "assistant");
 
-      const randomResponse =
-        MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
-      addMessage(randomResponse, "assistant");
+    try {
+      setMessageStreaming(aiMessage.id, true);
+
+      for await (const chunk of chatCompletionStream({ messages: [] })) {
+        if (!isGenerating.value) {
+          setMessageStopped(aiMessage.id, true);
+          break;
+        }
+
+        const delta = chunk.choices[0]?.delta?.content || "";
+        if (delta) {
+          appendMessageContent(aiMessage.id, delta);
+        }
+
+        if (chunk.choices[0]?.finish_reason === "stop") {
+          break;
+        }
+      }
     } catch (error) {
       console.error("发送消息失败:", error);
     } finally {
       isLoading.value = false;
       isGenerating.value = false;
+      setMessageStreaming(aiMessage.id, false);
     }
   }
 
@@ -186,19 +227,32 @@ export const useChatStore = defineStore("chat", () => {
     isLoading.value = true;
     isGenerating.value = true;
 
-    try {
-      await new Promise((resolve) =>
-        setTimeout(resolve, 800 + Math.random() * 700),
-      );
+    const aiMessage = addMessage("", "assistant");
 
-      const randomResponse =
-        MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
-      addMessage(randomResponse, "assistant");
+    try {
+      setMessageStreaming(aiMessage.id, true);
+
+      for await (const chunk of chatCompletionStream({ messages: [] })) {
+        if (!isGenerating.value) {
+          setMessageStopped(aiMessage.id, true);
+          break;
+        }
+
+        const delta = chunk.choices[0]?.delta?.content || "";
+        if (delta) {
+          appendMessageContent(aiMessage.id, delta);
+        }
+
+        if (chunk.choices[0]?.finish_reason === "stop") {
+          break;
+        }
+      }
     } catch (error) {
       console.error("重新生成失败:", error);
     } finally {
       isLoading.value = false;
       isGenerating.value = false;
+      setMessageStreaming(aiMessage.id, false);
     }
   }
 
@@ -244,5 +298,8 @@ export const useChatStore = defineStore("chat", () => {
     setEditingMessage,
     getConversationById,
     loadFromStorage,
+    appendMessageContent,
+    setMessageStreaming,
+    setMessageStopped,
   };
 });
