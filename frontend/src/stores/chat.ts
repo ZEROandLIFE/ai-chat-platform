@@ -143,6 +143,7 @@ export const useChatStore = defineStore("chat", () => {
     const msg = conv.messages.find((m) => m.id === messageId);
     if (msg) {
       msg.isStreaming = isStreaming;
+      saveToStorage();
     }
   }
 
@@ -183,12 +184,22 @@ export const useChatStore = defineStore("chat", () => {
     addMessage(content, "user");
     quotedMessage.value = null;
 
+    await generateResponse();
+  }
+
+  async function generateResponse(): Promise<void> {
+    const conv = currentConversation.value;
+    if (!conv || conv.messages.length === 0) return;
+
+    isLoading.value = true;
+    isGenerating.value = true;
+
     const aiMessage = addMessage("", "assistant");
 
     try {
       setMessageStreaming(aiMessage.id, true);
 
-      for await (const chunk of chatCompletionStream({ messages: [] })) {
+      for await (const chunk of chatCompletionStream({ messages: conv.messages })) {
         if (!isGenerating.value) {
           setMessageStopped(aiMessage.id, true);
           break;
@@ -292,12 +303,14 @@ export const useChatStore = defineStore("chat", () => {
     deleteMessage,
     clearCurrentConversation,
     sendMessage,
+    generateResponse,
     regenerateLastResponse,
     stopGenerating,
     setQuotedMessage,
     setEditingMessage,
     getConversationById,
     loadFromStorage,
+    saveToStorage,
     appendMessageContent,
     setMessageStreaming,
     setMessageStopped,

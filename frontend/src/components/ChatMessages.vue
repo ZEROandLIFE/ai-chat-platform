@@ -147,5 +147,6 @@
     flex-direction: column;
     gap: 16px;
     align-items: flex-start;
+    padding-bottom: 160px;
   }
 </style>

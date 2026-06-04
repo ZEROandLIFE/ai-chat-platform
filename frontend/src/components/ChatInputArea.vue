@@ -15,6 +15,7 @@
     chatStore.sendMessage(content);
     messageInput.value = "";
     uploadedFiles.value = [];
+    chatStore.setQuotedMessage(null);
   };
 
   const handleStop = () => {
@@ -70,6 +71,11 @@
         <span class="file-size">{{ formatFileSize(file.size) }}</span>
         <button class="remove-file-btn" @click="removeFile(file.id)">×</button>
       </div>
+    </div>
+    <div v-if="chatStore.quotedMessage" class="quote-preview">
+      <div class="quote-header">引用消息</div>
+      <div class="quote-content">{{ chatStore.quotedMessage.content }}</div>
+      <button class="remove-quote-btn" @click="chatStore.setQuotedMessage(null)">×</button>
     </div>
     <div class="input-row">
       <button
@@ -153,6 +159,43 @@
   }
 
   .remove-file-btn:hover {
+    color: #dc3545;
+  }
+
+  .quote-preview {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    background: #fff3cd;
+    border: 1px solid #ffeeba;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  .quote-header {
+    color: #856404;
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  .quote-content {
+    flex: 1;
+    color: #856404;
+    word-break: break-all;
+  }
+
+  .remove-quote-btn {
+    background: none;
+    border: none;
+    color: #856404;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
+  .remove-quote-btn:hover {
     color: #dc3545;
   }
 
@@ -254,6 +297,20 @@
   }
 
   .main-layout.dark .remove-file-btn:hover {
+    color: #f87171;
+  }
+
+  .main-layout.dark .quote-preview {
+    background: #2c2a1a;
+    border-color: #4a452a;
+  }
+
+  .main-layout.dark .quote-header,
+  .main-layout.dark .quote-content {
+    color: #d4b86a;
+  }
+
+  .main-layout.dark .remove-quote-btn:hover {
     color: #f87171;
   }
 
