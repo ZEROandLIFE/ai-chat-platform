@@ -9,6 +9,11 @@ export interface Message {
   isStopped?: boolean;
 }
 
+export interface QuotedMessageInfo {
+  message: Message;
+  index: number;
+}
+
 export interface Conversation {
   id: string;
   title: string;

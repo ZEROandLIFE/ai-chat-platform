@@ -1,9 +1,22 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const Conversation = require("../models/Conversation");
+const UploadedFile = require("../models/UploadedFile");
 const llmService = require("../services/llmService");
 
 const router = express.Router();
+
+const buildMessageWithFiles = async (content, conversationId) => {
+  const files = await UploadedFile.find({ conversationId });
+  if (files.length === 0) return content;
+
+  const fileContents = files
+    .filter((f) => f.content)
+    .map((f) => `【${f.name}】\n${f.content}`)
+    .join("\n\n---\n\n");
+
+  return `【用户消息】\n${content}\n\n【参考文件】\n${fileContents}`;
+};
 
 router.get("/", async (req, res) => {
   try {
@@ -71,10 +84,15 @@ router.post("/:id/message/stream", async (req, res) => {
     conversation.updatedAt = new Date();
     await conversation.save();
 
-    const messages = conversation.messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    const messages = await Promise.all(
+      conversation.messages.map(async (msg) => ({
+        role: msg.role,
+        content:
+          msg.role === "user"
+            ? await buildMessageWithFiles(msg.content, conversation.id)
+            : msg.content,
+      })),
+    );
 
     console.log("Conversation Routes: Sending SSE headers");
     res.writeHead(200, {
@@ -170,10 +188,15 @@ router.post("/:id/message", async (req, res) => {
     conversation.updatedAt = new Date();
     await conversation.save();
 
-    const messages = conversation.messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    const messages = await Promise.all(
+      conversation.messages.map(async (msg) => ({
+        role: msg.role,
+        content:
+          msg.role === "user"
+            ? await buildMessageWithFiles(msg.content, conversation.id)
+            : msg.content,
+      })),
+    );
 
     const aiResponse = await llmService.generateResponse(messages);
 
@@ -246,6 +269,102 @@ router.delete("/:id/message/:messageId", async (req, res) => {
   }
 });
 
+router.post("/:id/regenerate/stream", async (req, res) => {
+  try {
+    console.log("Conversation Routes: Regenerate stream request received");
+
+    const conversation = await Conversation.findOne({ id: req.params.id });
+
+    if (!conversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    if (conversation.messages.length < 2) {
+      return res
+        .status(400)
+        .json({ error: "Not enough messages to regenerate" });
+    }
+
+    conversation.messages.pop();
+
+    const messages = await Promise.all(
+      conversation.messages.map(async (msg) => ({
+        role: msg.role,
+        content:
+          msg.role === "user"
+            ? await buildMessageWithFiles(msg.content, conversation.id)
+            : msg.content,
+      })),
+    );
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+      "Transfer-Encoding": "chunked",
+    });
+
+    let fullResponse = "";
+    let sentChunks = 0;
+
+    try {
+      for await (const chunk of llmService.streamChatCompletion(messages)) {
+        fullResponse += chunk;
+        sentChunks++;
+        console.log(
+          "Conversation Routes: Sending regenerate chunk",
+          sentChunks,
+          "- length:",
+          chunk.length,
+        );
+        res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+      }
+    } catch (streamError) {
+      console.error(
+        "Conversation Routes: Regenerate stream error:",
+        streamError,
+      );
+      try {
+        res.write(
+          `data: ${JSON.stringify({ error: streamError.message })}\n\n`,
+        );
+      } catch (e) {
+        console.error(
+          "Conversation Routes: Error writing regenerate error response:",
+          e,
+        );
+      }
+      res.end();
+      return;
+    }
+
+    console.log(
+      "Conversation Routes: Regenerate stream completed, total response:",
+      fullResponse.length,
+      "chars",
+    );
+
+    const aiMessage = {
+      id: uuidv4(),
+      content: fullResponse,
+      role: "assistant",
+      timestamp: new Date(),
+      isStreaming: false,
+    };
+    conversation.messages.push(aiMessage);
+    conversation.updatedAt = new Date();
+    await conversation.save();
+
+    res.write(`data: ${JSON.stringify({ finish: true })}\n\n`);
+    res.end();
+    console.log("Conversation Routes: Regenerate response ended");
+  } catch (error) {
+    console.error("Conversation Routes: Regenerate error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.post("/:id/regenerate", async (req, res) => {
   try {
     const conversation = await Conversation.findOne({ id: req.params.id });
@@ -262,10 +381,15 @@ router.post("/:id/regenerate", async (req, res) => {
 
     conversation.messages.pop();
 
-    const messages = conversation.messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    const messages = await Promise.all(
+      conversation.messages.map(async (msg) => ({
+        role: msg.role,
+        content:
+          msg.role === "user"
+            ? await buildMessageWithFiles(msg.content, conversation.id)
+            : msg.content,
+      })),
+    );
 
     const aiResponse = await llmService.generateResponse(messages);
 

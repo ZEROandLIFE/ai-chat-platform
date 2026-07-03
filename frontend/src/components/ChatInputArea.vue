@@ -2,19 +2,29 @@
   import { ref } from "vue";
   import { useChatStore } from "../stores/chat";
   import { api } from "../utils/api";
+  import { FileReaderService } from "../utils/fileReader";
   import type { UploadedFile } from "../types";
 
   const chatStore = useChatStore();
 
   const messageInput = ref("");
-  const uploadedFiles = ref<UploadedFile[]>([]);
+  interface FileWithOriginal extends UploadedFile {
+    originalFile?: File;
+  }
+  const uploadedFiles = ref<FileWithOriginal[]>([]);
 
   const handleSend = () => {
     const content = messageInput.value.trim();
     if (!content && uploadedFiles.value.length === 0) return;
     if (chatStore.isLoading) return;
 
-    chatStore.sendMessage(content);
+    let sendContent = content;
+    if (!sendContent && uploadedFiles.value.length > 0) {
+      const fileNames = uploadedFiles.value.map((f) => f.name).join("、");
+      sendContent = `上传了文件：${fileNames}`;
+    }
+
+    chatStore.sendMessage(sendContent);
     messageInput.value = "";
     uploadedFiles.value = [];
     chatStore.setQuotedMessage(null);
@@ -35,13 +45,17 @@
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
           try {
-            const uploaded = await api.files.upload(chatStore.currentConversationId, file);
+            const uploaded = await api.files.upload(
+              chatStore.currentConversationId,
+              file,
+            );
             uploadedFiles.value.push({
               id: uploaded.id,
               name: file.name,
               size: file.size,
               type: file.type,
               uploadTime: new Date(),
+              originalFile: file,
             });
           } catch (error) {
             console.error("File upload failed:", error);
@@ -51,6 +65,7 @@
               size: file.size,
               type: file.type,
               uploadTime: new Date(),
+              originalFile: file,
             });
           }
         }
@@ -71,6 +86,14 @@
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   };
+
+  const handleFilePreview = async (file: FileWithOriginal) => {
+    if (file.originalFile) {
+      chatStore.setPreviewFile(file.originalFile);
+    } else if (file.id) {
+      await chatStore.previewFileById(file.id);
+    }
+  };
 </script>
 
 <template>
@@ -80,17 +103,29 @@
         v-for="file in uploadedFiles"
         :key="file.id"
         class="file-preview-item"
+        @click="handleFilePreview(file)"
       >
-        <span class="file-icon">📄</span>
+        <span class="file-icon">{{
+          FileReaderService.getFileIcon(file.name)
+        }}</span>
         <span class="file-name">{{ file.name }}</span>
         <span class="file-size">{{ formatFileSize(file.size) }}</span>
-        <button class="remove-file-btn" @click="removeFile(file.id)">×</button>
+        <button class="remove-file-btn" @click.stop="removeFile(file.id)">
+          ×
+        </button>
       </div>
     </div>
     <div v-if="chatStore.quotedMessage" class="quote-preview">
       <div class="quote-header">引用消息</div>
-      <div class="quote-content">{{ chatStore.quotedMessage.content }}</div>
-      <button class="remove-quote-btn" @click="chatStore.setQuotedMessage(null)">×</button>
+      <div class="quote-content">
+        {{ chatStore.quotedMessage.message.content }}
+      </div>
+      <button
+        class="remove-quote-btn"
+        @click="chatStore.setQuotedMessage(null)"
+      >
+        ×
+      </button>
     </div>
     <div class="input-row">
       <button
@@ -111,7 +146,11 @@
       <button
         class="action-btn"
         :class="chatStore.isGenerating ? 'stop-btn' : 'send-btn'"
-        :disabled="!chatStore.isGenerating && !messageInput.trim() && uploadedFiles.length === 0"
+        :disabled="
+          !chatStore.isGenerating &&
+          !messageInput.trim() &&
+          uploadedFiles.length === 0
+        "
         @click="chatStore.isGenerating ? handleStop() : handleSend()"
       >
         {{ chatStore.isGenerating ? "停止" : "发送" }}
@@ -145,6 +184,13 @@
     border: 1px solid #e5e5e5;
     border-radius: 6px;
     font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .file-preview-item:hover {
+    background: #f8f9fa;
+    border-color: #adb5bd;
   }
 
   .file-icon {

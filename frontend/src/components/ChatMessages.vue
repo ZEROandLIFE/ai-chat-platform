@@ -18,10 +18,21 @@
 
   const messagesContainer = ref<HTMLElement | null>(null);
   const messageRefs = ref<Map<string, HTMLElement>>(new Map());
+  const isNearBottom = ref(true);
+
+  const isScrollNearBottom = () => {
+    if (!messagesContainer.value) return true;
+    const container = messagesContainer.value;
+    const scrollTop = container.scrollTop;
+    const scrollHeight = container.scrollHeight;
+    const clientHeight = container.clientHeight;
+    const scrollThreshold = clientHeight * 0.5;
+    return scrollHeight - scrollTop - clientHeight < scrollThreshold;
+  };
 
   const scrollToBottom = () => {
     nextTick(() => {
-      if (messagesContainer.value) {
+      if (messagesContainer.value && isNearBottom.value) {
         messagesContainer.value.scrollTop =
           messagesContainer.value.scrollHeight;
       }
@@ -31,6 +42,7 @@
   watch(
     () => chatStore.currentMessages.length,
     () => {
+      isNearBottom.value = isScrollNearBottom();
       scrollToBottom();
     },
   );
@@ -38,6 +50,9 @@
   watch(
     () => chatStore.currentMessages.map((m) => m.content.length),
     () => {
+      if (!isNearBottom.value) {
+        isNearBottom.value = isScrollNearBottom();
+      }
       scrollToBottom();
     },
     { deep: true },
@@ -55,27 +70,37 @@
   const handleScroll = () => {
     if (!messagesContainer.value) return;
 
+    isNearBottom.value = isScrollNearBottom();
+
     const container = messagesContainer.value;
     const scrollTop = container.scrollTop;
-    const scrollHeight = container.scrollHeight;
     const clientHeight = container.clientHeight;
+    const viewportCenter = scrollTop + clientHeight / 2;
 
     const userMessages = props.userMessages;
     if (userMessages.length === 0) return;
 
-    const totalScroll = scrollHeight - clientHeight;
-    if (totalScroll <= 0) {
-      emit("updateActiveNavIndex", userMessages.length - 1);
-      return;
+    let activeIndex = userMessages.length - 1;
+    let closestDistance = Infinity;
+
+    for (let i = 0; i < userMessages.length; i++) {
+      const msgElement = document.querySelector(
+        `[data-message-id="${userMessages[i].id}"]`,
+      ) as HTMLElement;
+      if (msgElement) {
+        const msgTop = msgElement.offsetTop;
+        const msgHeight = msgElement.offsetHeight;
+        const msgCenter = msgTop + msgHeight / 2;
+        const distance = Math.abs(viewportCenter - msgCenter);
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          activeIndex = i;
+        }
+      }
     }
 
-    const scrollProgress = scrollTop / totalScroll;
-    const messageIndex = Math.floor(scrollProgress * userMessages.length);
-
-    emit(
-      "updateActiveNavIndex",
-      Math.min(Math.max(messageIndex, 0), userMessages.length - 1),
-    );
+    emit("updateActiveNavIndex", activeIndex);
   };
 
   defineExpose({
@@ -99,9 +124,10 @@
       </div>
       <div v-else class="messages-list">
         <MessageItem
-          v-for="msg in chatStore.currentMessages"
+          v-for="(msg, index) in chatStore.currentMessages"
           :key="msg.id"
           :message="msg"
+          :index="index"
           :ref="
             (el: any) => {
               if (el?.$el) messageRefs.set(msg.id, el.$el);

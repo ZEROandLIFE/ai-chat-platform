@@ -9,7 +9,7 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
         configure: (proxy) => {
-          proxy.on('proxyRes', (proxyRes, req, res) => {
+          proxy.on('proxyRes', (proxyRes, _req, _res) => {
             proxyRes.headers['Connection'] = 'keep-alive';
             proxyRes.headers['Cache-Control'] = 'no-cache';
             proxyRes.headers['X-Accel-Buffering'] = 'no';

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref, computed, reactive, nextTick } from "vue";
-import type { Message, Conversation } from "../types";
+import type { Message, Conversation, QuotedMessageInfo } from "../types";
 import { api } from "../utils/api";
 
 export const useChatStore = defineStore("chat", () => {
@@ -8,8 +8,15 @@ export const useChatStore = defineStore("chat", () => {
   const conversations = ref<Conversation[]>([]);
   const isLoading = ref(false);
   const isGenerating = ref(false);
-  const quotedMessage = ref<Message | null>(null);
+  const quotedMessage = ref<QuotedMessageInfo | null>(null);
   const currentAiMessageId = ref<string | null>(null);
+  const previewFile = ref<File | null>(null);
+  const showPreviewPanel = ref(false);
+  const previewFileInfo = ref<{
+    content: string;
+    name: string;
+    type: string;
+  } | null>(null);
 
   const currentConversation = computed(() => {
     return (
@@ -25,7 +32,13 @@ export const useChatStore = defineStore("chat", () => {
   function scrollToBottom() {
     const container = document.querySelector(".chat-messages") as HTMLElement;
     if (container) {
-      container.scrollTop = container.scrollHeight;
+      const scrollTop = container.scrollTop;
+      const scrollHeight = container.scrollHeight;
+      const clientHeight = container.clientHeight;
+      const scrollThreshold = clientHeight * 0.5;
+      if (scrollHeight - scrollTop - clientHeight < scrollThreshold) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
   }
 
@@ -79,14 +92,27 @@ export const useChatStore = defineStore("chat", () => {
 
     isLoading.value = true;
     isGenerating.value = true;
-    quotedMessage.value = null;
 
     const conv = currentConversation.value;
     if (!conv) return;
 
+    let finalContent = content;
+    if (quotedMessage.value) {
+      const { message, index } = quotedMessage.value;
+      const firstFewChars = message.content.substring(0, 10);
+      const ellipsis = message.content.length > 10 ? "……" : "";
+
+      if (message.role === "user") {
+        finalContent = `查看我先前第${index + 1}个提问，“${firstFewChars}${ellipsis}”。\n\n${content}`;
+      } else {
+        finalContent = `查看我先前第${Math.ceil((index + 1) / 2)}个提问，你的回答“${firstFewChars}${ellipsis}”。\n\n${content}`;
+      }
+    }
+    quotedMessage.value = null;
+
     conv.messages.push({
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      content,
+      content: finalContent,
       role: "user",
       timestamp: new Date(),
     });
@@ -153,21 +179,28 @@ export const useChatStore = defineStore("chat", () => {
     isLoading.value = true;
     isGenerating.value = true;
 
-    const aiMessage: Message = {
-      id: "",
+    const aiMessage = reactive<Message>({
+      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       content: "",
       role: "assistant",
       timestamp: new Date(),
       isStreaming: true,
-    };
+    });
     conv.messages.push(aiMessage);
 
     try {
-      const updated = await api.conversations.regenerate(
+      await api.conversations.regenerateStream(
         currentConversationId.value,
+        (chunk) => {
+          aiMessage.content += chunk;
+          nextTick(() => {
+            scrollToBottom();
+          });
+        },
+        () => {
+          aiMessage.isStreaming = false;
+        },
       );
-      conv.messages = updated.messages;
-      conv.updatedAt = updated.updatedAt;
     } catch (error) {
       console.error("Regenerate error:", error);
       aiMessage.content = "重新生成失败，请重试";
@@ -183,8 +216,35 @@ export const useChatStore = defineStore("chat", () => {
     isLoading.value = false;
   }
 
-  function setQuotedMessage(message: Message | null) {
-    quotedMessage.value = message;
+  function setQuotedMessage(message: Message | null, index: number = -1) {
+    if (message) {
+      quotedMessage.value = { message, index };
+    } else {
+      quotedMessage.value = null;
+    }
+  }
+
+  function setPreviewFile(file: File | null) {
+    previewFile.value = file;
+    previewFileInfo.value = null;
+    showPreviewPanel.value = file !== null;
+  }
+
+  async function previewFileById(fileId: string) {
+    try {
+      const fileInfo = await api.files.getContent(fileId);
+      if (fileInfo.type && fileInfo.type.startsWith("application/pdf")) {
+        const blob = await api.files.getRaw(fileId);
+        const file = new File([blob], fileInfo.name, { type: fileInfo.type });
+        setPreviewFile(file);
+      } else {
+        previewFileInfo.value = fileInfo;
+        previewFile.value = null;
+        showPreviewPanel.value = true;
+      }
+    } catch (error) {
+      console.error("Failed to preview file:", error);
+    }
   }
 
   function getConversationById(id: string): Conversation | undefined {
@@ -198,6 +258,9 @@ export const useChatStore = defineStore("chat", () => {
     isGenerating,
     quotedMessage,
     currentAiMessageId,
+    previewFile,
+    previewFileInfo,
+    showPreviewPanel,
     currentConversation,
     currentMessages,
     loadConversations,
@@ -210,6 +273,8 @@ export const useChatStore = defineStore("chat", () => {
     regenerateLastResponse,
     stopGenerating,
     setQuotedMessage,
+    setPreviewFile,
+    previewFileById,
     getConversationById,
   };
 });

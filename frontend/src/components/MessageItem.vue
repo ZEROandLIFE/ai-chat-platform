@@ -1,23 +1,73 @@
 <script setup lang="ts">
+  import { computed } from "vue";
   import type { Message } from "../types";
   import MarkdownRenderer from "./MarkdownRenderer.vue";
   import MessageActions from "./MessageActions.vue";
+  import { useChatStore } from "../stores/chat";
+  import { FileReaderService } from "../utils/fileReader";
+  import { api } from "../utils/api";
 
-  defineProps<{
+  const props = defineProps<{
     message: Message;
+    index: number;
   }>();
+
+  const chatStore = useChatStore();
+
+  const fileNames = computed(() => {
+    const match = props.message.content.match(/上传了文件：(.+)/);
+    if (match) {
+      return match[1].split("、").filter((f) => f.trim());
+    }
+    return [];
+  });
+
+  const handleFileClick = async (fileName: string) => {
+    if (props.message.role === "user") {
+      chatStore.stopGenerating();
+    }
+    if (chatStore.currentConversationId) {
+      try {
+        const files = await api.files.getByConversation(
+          chatStore.currentConversationId,
+        );
+        const file = files.find((f: any) => f.name === fileName);
+        if (file && file.id) {
+          await chatStore.previewFileById(file.id);
+        }
+      } catch (error) {
+        console.error("Failed to preview file:", error);
+      }
+    }
+  };
 </script>
 
 <template>
   <div
     class="message"
     :class="[message.role, { streaming: message.isStreaming }]"
+    :data-message-id="message.id"
   >
     <div class="message-content">
       <MarkdownRenderer
         v-if="message.role === 'assistant'"
         :content="message.content"
       />
+      <template v-else-if="fileNames.length > 0">
+        <div class="file-preview-list">
+          <span
+            v-for="fileName in fileNames"
+            :key="fileName"
+            class="file-preview-tag"
+            @click="handleFileClick(fileName)"
+          >
+            <span class="file-icon">{{
+              FileReaderService.getFileIcon(fileName)
+            }}</span>
+            <span class="file-name">{{ fileName }}</span>
+          </span>
+        </div>
+      </template>
       <template v-else>{{ message.content }}</template>
       <span v-if="message.isStreaming" class="typing-indicator">
         <span class="dot"></span>
@@ -30,7 +80,7 @@
         {{ new Date(message.timestamp).toLocaleTimeString() }}
       </span>
       <div class="footer-actions">
-        <MessageActions :message="message" />
+        <MessageActions :message="message" :index="index" />
       </div>
     </div>
   </div>
@@ -41,6 +91,42 @@
     max-width: 70%;
     padding: 12px 16px;
     border-radius: 12px;
+  }
+
+  .file-preview-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .file-preview-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: #fff;
+    border: 1px solid #e5e5e5;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .file-preview-tag:hover {
+    background: #f8f9fa;
+    border-color: #adb5bd;
+  }
+
+  .file-preview-tag .file-icon {
+    font-size: 14px;
+  }
+
+  .file-preview-tag .file-name {
+    color: #333;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .message.user {

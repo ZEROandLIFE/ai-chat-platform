@@ -5,6 +5,7 @@
 
   const props = defineProps<{
     message: Message;
+    index: number;
   }>();
 
   const chatStore = useChatStore();
@@ -18,7 +19,7 @@
 
   const handleQuote = () => {
     showActions.value = false;
-    chatStore.setQuotedMessage(props.message);
+    chatStore.setQuotedMessage(props.message, props.index);
   };
 
   const handleCopy = async () => {

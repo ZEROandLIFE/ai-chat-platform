@@ -1,11 +1,12 @@
 <script setup lang="ts">
-  import { ref, computed } from "vue";
+  import { ref, computed, watch } from "vue";
   import { useThemeStore } from "../../stores/theme";
   import { useChatStore } from "../../stores/chat";
   import Sidebar from "../../components/Sidebar.vue";
   import ChatHeader from "../../components/ChatHeader.vue";
   import ChatMessages from "../../components/ChatMessages.vue";
   import ChatInputArea from "../../components/ChatInputArea.vue";
+  import FilePreviewPanel from "../../components/FilePreviewPanel.vue";
 
   const themeStore = useThemeStore();
   const chatStore = useChatStore();
@@ -24,6 +25,15 @@
   const updateActiveNavIndex = (index: number) => {
     activeNavIndex.value = index;
   };
+
+  watch(
+    () => chatStore.showPreviewPanel,
+    (show) => {
+      if (show) {
+        sidebarCollapsed.value = true;
+      }
+    },
+  );
 </script>
 
 <template>
@@ -41,6 +51,7 @@
       />
       <ChatInputArea />
     </div>
+    <FilePreviewPanel />
   </div>
 </template>
 

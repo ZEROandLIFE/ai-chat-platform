@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const path = require("path");
 const fs = require("fs");
 const UploadedFile = require("../models/UploadedFile");
+const FileParserService = require("../services/fileParser");
 
 const router = express.Router();
 
@@ -26,8 +27,9 @@ router.post("/upload", async (req, res) => {
       const fileList = Array.isArray(files.file) ? files.file : [files.file];
 
       for (const file of fileList) {
-        const fileName = `${uuidv4()}_${file.name}`;
-        const filePath = path.join(uploadDir, fileName);
+        const ext = path.extname(file.name);
+        const storedFileName = `${uuidv4()}${ext}`;
+        const filePath = path.join(uploadDir, storedFileName);
 
         await new Promise((resolve, reject) => {
           file.mv(filePath, (err) => {
@@ -35,6 +37,11 @@ router.post("/upload", async (req, res) => {
             else resolve();
           });
         });
+
+        const content = await FileParserService.parseAndSummarize(
+          filePath,
+          file.name,
+        );
 
         const newFile = new UploadedFile({
           id: uuidv4(),
@@ -44,6 +51,7 @@ router.post("/upload", async (req, res) => {
           uploadTime: new Date(),
           conversationId: conversationId,
           filePath: filePath,
+          content: content,
         });
 
         await newFile.save();
@@ -96,6 +104,50 @@ router.delete("/:id", async (req, res) => {
 
     res.json({ message: "File deleted" });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/:id/content", async (req, res) => {
+  try {
+    const file = await UploadedFile.findOne({ id: req.params.id });
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    if (file.content) {
+      res.json({ content: file.content, name: file.name, type: file.type });
+    } else if (file.filePath && fs.existsSync(file.filePath)) {
+      const content = await FileParserService.parseAndSummarize(
+        file.filePath,
+        file.name,
+      );
+      res.json({ content: content, name: file.name, type: file.type });
+    } else {
+      res.status(404).json({ error: "File content not available" });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get("/:id/raw", async (req, res) => {
+  try {
+    const file = await UploadedFile.findOne({ id: req.params.id });
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    if (file.filePath && fs.existsSync(file.filePath)) {
+      res.setHeader("Content-Type", file.type || "application/octet-stream");
+      res.setHeader("Content-Disposition", "inline");
+      const fileStream = fs.createReadStream(file.filePath);
+      fileStream.pipe(res);
+    } else {
+      res.status(404).json({ error: "File not available" });
+    }
+  } catch (error) {
+    console.error("Raw file error:", error);
     res.status(500).json({ error: error.message });
   }
 });
