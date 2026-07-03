@@ -1,10 +1,7 @@
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { ref, computed, reactive, nextTick } from "vue";
 import type { Message, Conversation } from "../types";
-import { generateId, generateConversationTitle } from "../types";
-import { chatCompletionStream } from "../utils/mockApi";
-
-const STORAGE_KEY = "ai-chat-conversations";
+import { api } from "../utils/api";
 
 export const useChatStore = defineStore("chat", () => {
   const currentConversationId = ref<string | null>(null);
@@ -12,7 +9,7 @@ export const useChatStore = defineStore("chat", () => {
   const isLoading = ref(false);
   const isGenerating = ref(false);
   const quotedMessage = ref<Message | null>(null);
-  const editingMessageId = ref<string | null>(null);
+  const currentAiMessageId = ref<string | null>(null);
 
   const currentConversation = computed(() => {
     return (
@@ -25,245 +22,159 @@ export const useChatStore = defineStore("chat", () => {
     return currentConversation.value?.messages || [];
   });
 
-  function loadFromStorage() {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        conversations.value = parsed.conversations || [];
-        currentConversationId.value = parsed.currentConversationId || null;
-      } catch {
-        conversations.value = [];
-        currentConversationId.value = null;
-      }
+  function scrollToBottom() {
+    const container = document.querySelector(".chat-messages") as HTMLElement;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
     }
   }
 
-  function saveToStorage() {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        conversations: conversations.value,
-        currentConversationId: currentConversationId.value,
-      }),
-    );
+  async function loadConversations() {
+    try {
+      conversations.value = await api.conversations.getAll();
+      if (conversations.value.length > 0 && !currentConversationId.value) {
+        currentConversationId.value = conversations.value[0].id;
+      }
+    } catch (error) {
+      console.error("Failed to load conversations:", error);
+      conversations.value = [];
+    }
   }
 
-  function createConversation(): Conversation {
-    const newConversation: Conversation = {
-      id: generateId(),
-      title: "新对话",
-      messages: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      model: "gpt-3.5",
-    };
+  async function createConversation(): Promise<Conversation> {
+    const newConversation = await api.conversations.create();
     conversations.value.unshift(newConversation);
     currentConversationId.value = newConversation.id;
-    saveToStorage();
     return newConversation;
   }
 
-  function selectConversation(id: string) {
+  async function selectConversation(id: string) {
     currentConversationId.value = id;
-    saveToStorage();
   }
 
-  function deleteConversation(id: string) {
+  async function deleteConversation(id: string) {
+    await api.conversations.delete(id);
     const index = conversations.value.findIndex((c) => c.id === id);
     if (index !== -1) {
       conversations.value.splice(index, 1);
-      if (currentConversationId.value === id) {
-        currentConversationId.value = conversations.value[0]?.id || null;
-      }
-      saveToStorage();
+    }
+    if (currentConversationId.value === id) {
+      currentConversationId.value = conversations.value[0]?.id || null;
     }
   }
 
-  function addMessage(content: string, role: "user" | "assistant"): Message {
-    const conversation = currentConversation.value;
-    if (!conversation) {
-      createConversation();
-    }
-
-    const newMessage: Message = {
-      id: generateId(),
-      content,
-      role,
-      timestamp: new Date(),
-    };
-
-    const conv = currentConversation.value;
+  async function updateConversationTitle(id: string, title: string) {
+    const updated = await api.conversations.updateTitle(id, title);
+    const conv = conversations.value.find((c) => c.id === id);
     if (conv) {
-      conv.messages.push(newMessage);
-      conv.updatedAt = new Date();
-
-      if (
-        role === "user" &&
-        conv.messages.length === 1 &&
-        conv.title === "新对话"
-      ) {
-        conv.title = generateConversationTitle(content);
-      }
-
-      saveToStorage();
-    }
-
-    return newMessage;
-  }
-
-  function updateMessage(messageId: string, content: string) {
-    const conv = currentConversation.value;
-    if (!conv) return;
-
-    const msg = conv.messages.find((m) => m.id === messageId);
-    if (msg) {
-      msg.content = content;
-      msg.isEdited = true;
-      msg.timestamp = new Date();
-      saveToStorage();
-    }
-  }
-
-  function appendMessageContent(messageId: string, content: string) {
-    const conv = currentConversation.value;
-    if (!conv) return;
-
-    const msg = conv.messages.find((m) => m.id === messageId);
-    if (msg) {
-      msg.content += content;
-      saveToStorage();
-    }
-  }
-
-  function setMessageStreaming(messageId: string, isStreaming: boolean) {
-    const conv = currentConversation.value;
-    if (!conv) return;
-
-    const msg = conv.messages.find((m) => m.id === messageId);
-    if (msg) {
-      msg.isStreaming = isStreaming;
-      saveToStorage();
-    }
-  }
-
-  function setMessageStopped(messageId: string, isStopped: boolean) {
-    const conv = currentConversation.value;
-    if (!conv) return;
-
-    const msg = conv.messages.find((m) => m.id === messageId);
-    if (msg) {
-      msg.isStopped = isStopped;
-    }
-  }
-
-  function deleteMessage(messageId: string) {
-    const conv = currentConversation.value;
-    if (!conv) return;
-
-    const index = conv.messages.findIndex((m) => m.id === messageId);
-    if (index !== -1) {
-      conv.messages.splice(index, 1);
-      saveToStorage();
-    }
-  }
-
-  function clearCurrentConversation() {
-    const conv = currentConversation.value;
-    if (conv) {
-      conv.messages = [];
-      conv.title = "新对话";
-      saveToStorage();
+      conv.title = updated.title;
+      conv.updatedAt = updated.updatedAt;
     }
   }
 
   async function sendMessage(content: string): Promise<void> {
+    if (!currentConversationId.value) {
+      await createConversation();
+    }
+
     isLoading.value = true;
     isGenerating.value = true;
-
-    addMessage(content, "user");
     quotedMessage.value = null;
 
-    await generateResponse();
-  }
-
-  async function generateResponse(): Promise<void> {
     const conv = currentConversation.value;
-    if (!conv || conv.messages.length === 0) return;
+    if (!conv) return;
 
-    isLoading.value = true;
-    isGenerating.value = true;
+    conv.messages.push({
+      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      content,
+      role: "user",
+      timestamp: new Date(),
+    });
 
-    const aiMessage = addMessage("", "assistant");
+    if (conv.messages.length === 1 && conv.title === "新对话") {
+      conv.title =
+        content.length > 30 ? content.substring(0, 30) + "..." : content;
+    }
+
+    const aiMessage = reactive<Message>({
+      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      content: "",
+      role: "assistant",
+      timestamp: new Date(),
+      isStreaming: true,
+    });
+    conv.messages.push(aiMessage);
 
     try {
-      setMessageStreaming(aiMessage.id, true);
-
-      for await (const chunk of chatCompletionStream({ messages: conv.messages })) {
-        if (!isGenerating.value) {
-          setMessageStopped(aiMessage.id, true);
-          break;
-        }
-
-        const delta = chunk.choices[0]?.delta?.content || "";
-        if (delta) {
-          appendMessageContent(aiMessage.id, delta);
-        }
-
-        if (chunk.choices[0]?.finish_reason === "stop") {
-          break;
-        }
-      }
+      await api.conversations.sendMessageStream(
+        currentConversationId.value!,
+        content,
+        (chunk) => {
+          aiMessage.content += chunk;
+          nextTick(() => {
+            scrollToBottom();
+          });
+        },
+        () => {
+          aiMessage.isStreaming = false;
+        },
+      );
     } catch (error) {
-      console.error("发送消息失败:", error);
+      console.error("Send message error:", error);
+      aiMessage.content = "发送消息失败，请重试";
+      aiMessage.isStreaming = false;
     } finally {
       isLoading.value = false;
       isGenerating.value = false;
-      setMessageStreaming(aiMessage.id, false);
+      currentAiMessageId.value = null;
     }
+  }
+
+  async function deleteMessage(messageId: string) {
+    const conv = currentConversation.value;
+    if (!conv || !currentConversationId.value) return;
+
+    const updated = await api.conversations.deleteMessage(
+      currentConversationId.value,
+      messageId,
+    );
+    conv.messages = updated.messages;
+    conv.updatedAt = updated.updatedAt;
   }
 
   async function regenerateLastResponse(): Promise<void> {
     const conv = currentConversation.value;
-    if (!conv || conv.messages.length < 2) return;
+    if (!conv || !currentConversationId.value) return;
 
-    const lastUserMessage = conv.messages[conv.messages.length - 2];
-    if (lastUserMessage.role !== "user") return;
-
-    const lastAiMessage = conv.messages[conv.messages.length - 1];
-    if (lastAiMessage.role !== "assistant") return;
+    if (conv.messages.length < 2) return;
 
     conv.messages.pop();
 
     isLoading.value = true;
     isGenerating.value = true;
 
-    const aiMessage = addMessage("", "assistant");
+    const aiMessage: Message = {
+      id: "",
+      content: "",
+      role: "assistant",
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+    conv.messages.push(aiMessage);
 
     try {
-      setMessageStreaming(aiMessage.id, true);
-
-      for await (const chunk of chatCompletionStream({ messages: [] })) {
-        if (!isGenerating.value) {
-          setMessageStopped(aiMessage.id, true);
-          break;
-        }
-
-        const delta = chunk.choices[0]?.delta?.content || "";
-        if (delta) {
-          appendMessageContent(aiMessage.id, delta);
-        }
-
-        if (chunk.choices[0]?.finish_reason === "stop") {
-          break;
-        }
-      }
+      const updated = await api.conversations.regenerate(
+        currentConversationId.value,
+      );
+      conv.messages = updated.messages;
+      conv.updatedAt = updated.updatedAt;
     } catch (error) {
-      console.error("重新生成失败:", error);
+      console.error("Regenerate error:", error);
+      aiMessage.content = "重新生成失败，请重试";
+      aiMessage.isStreaming = false;
     } finally {
       isLoading.value = false;
       isGenerating.value = false;
-      setMessageStreaming(aiMessage.id, false);
     }
   }
 
@@ -276,15 +187,9 @@ export const useChatStore = defineStore("chat", () => {
     quotedMessage.value = message;
   }
 
-  function setEditingMessage(messageId: string | null) {
-    editingMessageId.value = messageId;
-  }
-
   function getConversationById(id: string): Conversation | undefined {
     return conversations.value.find((c) => c.id === id);
   }
-
-  loadFromStorage();
 
   return {
     currentConversationId,
@@ -292,27 +197,19 @@ export const useChatStore = defineStore("chat", () => {
     isLoading,
     isGenerating,
     quotedMessage,
-    editingMessageId,
+    currentAiMessageId,
     currentConversation,
     currentMessages,
+    loadConversations,
     createConversation,
     selectConversation,
     deleteConversation,
-    addMessage,
-    updateMessage,
-    deleteMessage,
-    clearCurrentConversation,
+    updateConversationTitle,
     sendMessage,
-    generateResponse,
+    deleteMessage,
     regenerateLastResponse,
     stopGenerating,
     setQuotedMessage,
-    setEditingMessage,
     getConversationById,
-    loadFromStorage,
-    saveToStorage,
-    appendMessageContent,
-    setMessageStreaming,
-    setMessageStopped,
   };
 });

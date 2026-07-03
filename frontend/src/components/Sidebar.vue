@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref, computed, nextTick } from "vue";
+  import { ref, computed, nextTick, onMounted } from "vue";
   import { useThemeStore } from "../stores/theme";
   import { useChatStore } from "../stores/chat";
   import type { Conversation } from "../types";
@@ -14,6 +14,10 @@
   const editingConversationId = ref<string | null>(null);
   const editingTitle = ref("");
   const searchQuery = ref("");
+
+  onMounted(() => {
+    chatStore.loadConversations();
+  });
 
   const filteredConversations = computed(() => {
     if (!searchQuery.value.trim()) {
@@ -37,12 +41,12 @@
     });
   };
 
-  const saveTitle = () => {
+  const saveTitle = async () => {
     if (editingConversationId.value && editingTitle.value.trim()) {
-      const conv = chatStore.getConversationById(editingConversationId.value);
-      if (conv) {
-        conv.title = editingTitle.value.trim();
-      }
+      await chatStore.updateConversationTitle(
+        editingConversationId.value,
+        editingTitle.value.trim()
+      );
     }
     editingConversationId.value = null;
     editingTitle.value = "";

@@ -1,6 +1,7 @@
 <script setup lang="ts">
   import { ref } from "vue";
   import { useChatStore } from "../stores/chat";
+  import { api } from "../utils/api";
   import type { UploadedFile } from "../types";
 
   const chatStore = useChatStore();
@@ -10,7 +11,8 @@
 
   const handleSend = () => {
     const content = messageInput.value.trim();
-    if (!content || chatStore.isLoading) return;
+    if (!content && uploadedFiles.value.length === 0) return;
+    if (chatStore.isLoading) return;
 
     chatStore.sendMessage(content);
     messageInput.value = "";
@@ -26,18 +28,31 @@
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
-    input.onchange = (e: Event) => {
+    input.accept = ".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif";
+    input.onchange = async (e: Event) => {
       const files = (e.target as HTMLInputElement).files;
-      if (files) {
+      if (files && chatStore.currentConversationId) {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          uploadedFiles.value.push({
-            id: `file-${Date.now()}-${i}`,
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            uploadTime: new Date(),
-          });
+          try {
+            const uploaded = await api.files.upload(chatStore.currentConversationId, file);
+            uploadedFiles.value.push({
+              id: uploaded.id,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              uploadTime: new Date(),
+            });
+          } catch (error) {
+            console.error("File upload failed:", error);
+            uploadedFiles.value.push({
+              id: `file-${Date.now()}-${i}`,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              uploadTime: new Date(),
+            });
+          }
         }
       }
     };
@@ -96,7 +111,7 @@
       <button
         class="action-btn"
         :class="chatStore.isGenerating ? 'stop-btn' : 'send-btn'"
-        :disabled="!chatStore.isGenerating && !messageInput.trim()"
+        :disabled="!chatStore.isGenerating && !messageInput.trim() && uploadedFiles.length === 0"
         @click="chatStore.isGenerating ? handleStop() : handleSend()"
       >
         {{ chatStore.isGenerating ? "停止" : "发送" }}
