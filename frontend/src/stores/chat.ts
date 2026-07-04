@@ -231,13 +231,26 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   async function previewFileById(fileId: string) {
+    console.log(`[previewFileById] Starting preview for file ID: ${fileId}`);
     try {
       const fileInfo = await api.files.getContent(fileId);
+      console.log(
+        `[previewFileById] File info: name=${fileInfo.name}, type=${fileInfo.type}`,
+      );
       if (fileInfo.type && fileInfo.type.startsWith("application/pdf")) {
+        console.log(`[previewFileById] It's a PDF file, fetching raw data...`);
         const blob = await api.files.getRaw(fileId);
+        console.log(
+          `[previewFileById] Raw blob received: type=${blob.type}, size=${blob.size}`,
+        );
         const file = new File([blob], fileInfo.name, { type: fileInfo.type });
+        console.log(
+          `[previewFileById] Created File object: name=${file.name}, size=${file.size}`,
+        );
         setPreviewFile(file);
+        console.log(`[previewFileById] Preview file set successfully`);
       } else {
+        console.log(`[previewFileById] Not a PDF file, showing text preview`);
         previewFileInfo.value = fileInfo;
         previewFile.value = null;
         showPreviewPanel.value = true;

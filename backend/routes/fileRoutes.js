@@ -27,25 +27,51 @@ router.post("/upload", async (req, res) => {
       const fileList = Array.isArray(files.file) ? files.file : [files.file];
 
       for (const file of fileList) {
-        const ext = path.extname(file.name);
+        let originalName = file.name;
+
+        try {
+          const buf = Buffer.from(originalName, "latin1");
+          originalName = buf.toString("utf8");
+        } catch (e) {
+          console.log(
+            "Filename encoding conversion failed, using original:",
+            originalName,
+          );
+        }
+
+        const extMatch = originalName.match(/\.[^.]+$/);
+        const ext = extMatch ? extMatch[0] : "";
         const storedFileName = `${uuidv4()}${ext}`;
         const filePath = path.join(uploadDir, storedFileName);
 
-        await new Promise((resolve, reject) => {
-          file.mv(filePath, (err) => {
-            if (err) reject(err);
-            else resolve();
-          });
-        });
+        console.log(`Uploading file: ${originalName}, saving to: ${filePath}`);
 
-        const content = await FileParserService.parseAndSummarize(
-          filePath,
-          file.name,
-        );
+        try {
+          fs.writeFileSync(filePath, file.data);
+          console.log("File saved successfully");
+        } catch (writeErr) {
+          console.error("Failed to save file:", writeErr);
+          await new Promise((resolve, reject) => {
+            file.mv(filePath, (err) => {
+              if (err) reject(err);
+              else resolve();
+            });
+          });
+        }
+
+        let content = "";
+        try {
+          content = await FileParserService.parseAndSummarize(
+            filePath,
+            originalName,
+          );
+        } catch (parseError) {
+          console.error("Failed to parse file content:", parseError);
+        }
 
         const newFile = new UploadedFile({
           id: uuidv4(),
-          name: file.name,
+          name: originalName,
           size: file.size,
           type: file.mimetype,
           uploadTime: new Date(),

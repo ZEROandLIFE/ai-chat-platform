@@ -23,17 +23,68 @@
   });
 
   const handleFileClick = async (fileName: string) => {
+    console.log(`[handleFileClick] Clicked file: ${fileName}`);
     if (props.message.role === "user") {
       chatStore.stopGenerating();
     }
     if (chatStore.currentConversationId) {
+      console.log(
+        `[handleFileClick] Conversation ID: ${chatStore.currentConversationId}`,
+      );
       try {
         const files = await api.files.getByConversation(
           chatStore.currentConversationId,
         );
-        const file = files.find((f: any) => f.name === fileName);
-        if (file && file.id) {
-          await chatStore.previewFileById(file.id);
+        console.log(`[handleFileClick] Files found: ${files.length}`);
+        files.forEach((f: any) => {
+          console.log(
+            `  - Name: ${f.name}, ID: ${f.id}, Type: ${f.type}, UploadTime: ${f.uploadTime}`,
+          );
+        });
+
+        let matchedFiles = files.filter((f: any) => f.name === fileName);
+
+        if (matchedFiles.length === 0) {
+          const ext = fileName.substring(fileName.lastIndexOf("."));
+          const nameWithoutExt = fileName.substring(
+            0,
+            fileName.lastIndexOf("."),
+          );
+          matchedFiles = files.filter((f: any) => {
+            const fExt = f.name.substring(f.name.lastIndexOf("."));
+            return fExt === ext && f.name.includes(nameWithoutExt);
+          });
+        }
+
+        if (matchedFiles.length === 0) {
+          matchedFiles = files.filter((f: any) => {
+            try {
+              const decodedName = decodeURIComponent(escape(f.name));
+              return decodedName === fileName;
+            } catch {
+              return false;
+            }
+          });
+        }
+
+        if (matchedFiles.length === 0) {
+          const ext = fileName.substring(fileName.lastIndexOf("."));
+          matchedFiles = files.filter((f: any) => f.name.endsWith(ext));
+        }
+
+        console.log(`[handleFileClick] Matched files: ${matchedFiles.length}`);
+        if (matchedFiles.length > 0) {
+          const latestFile = matchedFiles.reduce((prev: any, curr: any) => {
+            return new Date(curr.uploadTime) > new Date(prev.uploadTime)
+              ? curr
+              : prev;
+          });
+          console.log(
+            `[handleFileClick] Latest file ID: ${latestFile.id}, Type: ${latestFile.type}`,
+          );
+          if (latestFile && latestFile.id) {
+            await chatStore.previewFileById(latestFile.id);
+          }
         }
       } catch (error) {
         console.error("Failed to preview file:", error);
