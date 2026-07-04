@@ -17,6 +17,7 @@ export const useChatStore = defineStore("chat", () => {
     name: string;
     type: string;
   } | null>(null);
+  const selectedText = ref("");
 
   const currentConversation = computed(() => {
     return (
@@ -230,6 +231,14 @@ export const useChatStore = defineStore("chat", () => {
     showPreviewPanel.value = file !== null;
   }
 
+  function setSelectedText(text: string) {
+    selectedText.value = text;
+  }
+
+  function clearSelectedText() {
+    selectedText.value = "";
+  }
+
   async function previewFileById(fileId: string) {
     console.log(`[previewFileById] Starting preview for file ID: ${fileId}`);
     try {
@@ -274,6 +283,7 @@ export const useChatStore = defineStore("chat", () => {
     previewFile,
     previewFileInfo,
     showPreviewPanel,
+    selectedText,
     currentConversation,
     currentMessages,
     loadConversations,
@@ -289,5 +299,7 @@ export const useChatStore = defineStore("chat", () => {
     setPreviewFile,
     previewFileById,
     getConversationById,
+    setSelectedText,
+    clearSelectedText,
   };
 });

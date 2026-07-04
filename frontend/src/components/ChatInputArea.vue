@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref } from "vue";
+  import { ref, watch, nextTick } from "vue";
   import { useChatStore } from "../stores/chat";
   import { api } from "../utils/api";
   import { FileReaderService } from "../utils/fileReader";
@@ -8,6 +8,7 @@
   const chatStore = useChatStore();
 
   const messageInput = ref("");
+  const inputRef = ref<HTMLInputElement | null>(null);
   interface FileWithOriginal extends UploadedFile {
     originalFile?: File;
   }
@@ -94,6 +95,19 @@
       await chatStore.previewFileById(file.id);
     }
   };
+
+  watch(
+    () => chatStore.selectedText,
+    (text) => {
+      if (text) {
+        messageInput.value = `解释一下这段内容："${text}"`;
+        nextTick(() => {
+          inputRef.value?.focus();
+        });
+        chatStore.clearSelectedText();
+      }
+    },
+  );
 </script>
 
 <template>
@@ -137,6 +151,7 @@
         📎
       </button>
       <input
+        ref="inputRef"
         v-model="messageInput"
         type="text"
         class="chat-input"
